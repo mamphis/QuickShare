@@ -1,12 +1,37 @@
 ﻿namespace qs
 {
+    using qs.Utils;
     using System;
+    using System.Linq;
+    using System.Text.RegularExpressions;
 
     class Program
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("Hello World!");
+            if(args.Length == 0)
+            {
+                PrintHelp();
+            }
+
+            if (args[0] == "share")
+            {
+                FileSharer.Share(args.Skip(1).ToArray());
+                return;
+            }
+
+            if (CodeGenerator.codeRegex.IsMatch(args[0]))
+            {
+                FileReceiver.Receive(args[0]);
+                return;
+            }
+
+            PrintHelp();
+        }
+
+        private static void PrintHelp()
+        {
+            throw new NotImplementedException();
         }
     }
 }
