@@ -87,6 +87,8 @@ namespace qs
             IPEndPoint ipep = new IPEndPoint(0, 0);
             byte[] data = udpClient.EndReceive(ar, ref ipep);
             string[] files = ar.AsyncState as string[];
+            udpClient.Close();
+
             currentState = TransferState.ConnectionAccepted;
 
             while (currentState == TransferState.ConnectionAccepted)
@@ -152,11 +154,13 @@ namespace qs
                 writer.Write(true);
                 Console.WriteLine($"\tSending File: {fi.FileName}");
 
+                var bytes = File.ReadAllBytes(fi.Path);
+                fi.FileHash = Encryption.GetHash(bytes);
+
                 using MemoryStream ms = new MemoryStream();
                 formatter.Serialize(ms, fi);
                 byte[] data = Encryption.Encrypt(ms.ToArray(), aesParams);
 
-                var bytes = File.ReadAllBytes(fi.Path);
                 var encrBytes = Encryption.Encrypt(bytes, aesParams);
 
                 // Send FI

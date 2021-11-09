@@ -1,4 +1,4 @@
-﻿using qs.Model;
+using qs.Model;
 using qs.Utils;
 using System;
 using System.Collections.Generic;
@@ -121,7 +121,20 @@ namespace qs
 
                 fileWritingTasks.Add(Task.Run(() =>
                 {
-                    File.WriteAllBytes(fileInfo.FileName, Encryption.Decrypt(bytes.ToArray(), aesParams));
+                    byte[] decryptedBytes = Encryption.Decrypt(bytes.ToArray(), aesParams);
+                    byte[] hash = Encryption.GetHash(decryptedBytes);
+                    
+                    Console.SetCursorPosition(left + 10, top);
+
+                    if (hash.SequenceEqual(fileInfo.FileHash))
+                    {
+                            Console.Write(" Checksum OK ");
+                        File.WriteAllBytes(fileInfo.FileName, decryptedBytes);
+                    }
+                    else
+                    {
+                            Console.Write(" Checksum Failed ");
+                    }
                 }));
                 Console.WriteLine();
             }
