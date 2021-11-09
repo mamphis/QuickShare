@@ -31,7 +31,14 @@
 
         private static void PrintHelp()
         {
-            throw new NotImplementedException();
+            Console.WriteLine("Incorrect usage. Please use the following command\n" +
+                "To share files please use\n" +
+                $"    {AppDomain.CurrentDomain.FriendlyName} share <File1> [File2 ...]\n" +
+                $"\n" +
+                $"To receive files please use\n" +
+                $"    {AppDomain.CurrentDomain.FriendlyName} <6DigitCode>");
+
+            Environment.Exit(0);
         }
     }
 }
