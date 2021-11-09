@@ -22,7 +22,7 @@
 
             if (CodeGenerator.codeRegex.IsMatch(args[0]))
             {
-                FileReceiver.Receive(args[0]);
+                new FileReceiver().Receive(args[0]);
                 return;
             }
 

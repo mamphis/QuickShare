@@ -1,4 +1,4 @@
-using qs.Model;
+﻿using qs.Model;
 using qs.Utils;
 using System;
 using System.Collections.Generic;
@@ -13,19 +13,21 @@ namespace qs
 {
     internal class FileReceiver
     {
-        private static UdpClient udpClient;
-        private static readonly Random dice = new Random();
-        private static TcpListener listener;
-        internal static void Receive(string v)
+        private UdpClient udpClient;
+        private readonly Random dice = new Random();
+        private TcpListener listener;
+        private readonly object writeLock = new object();
+
+        internal void Receive(string v)
         {
-            udpClient = new UdpClient();
+            this.udpClient = new UdpClient();
 
             IPAddress ip = Dns.GetHostEntry(Dns.GetHostName()).AddressList.Where(addr => addr.AddressFamily == AddressFamily.InterNetwork).FirstOrDefault();
             Peer peer = new Peer()
             {
                 Code = v,
                 IP = ip.ToString(),
-                TcpPort = dice.Next(10000, 25000)
+                TcpPort = this.dice.Next(10000, 25000)
             };
 
             byte[] data;
@@ -37,21 +39,25 @@ namespace qs
                 data = ms.ToArray();
             }
 
-            listener = new TcpListener(peer.IPEndPoint);
-            listener.Start();
-            listener.BeginAcceptSocket(AcceptSocket, null);
+            this.listener = new TcpListener(peer.IPEndPoint);
+            this.listener.Start();
+            this.listener.BeginAcceptSocket(this.AcceptSocket, null);
 
-            udpClient.Send(data, data.Length, new IPEndPoint(IPAddress.Broadcast, Settings.BINDING_PORT));
+            this.udpClient.Send(data, data.Length, new IPEndPoint(IPAddress.Broadcast, Settings.BINDING_PORT));
+
             Task.WaitAll(Task.Run(() =>
             {
-                Console.WriteLine("Press Enter to exit.");
+                lock (this.writeLock)
+                {
+                    Console.WriteLine("Press Enter to exit.");
+                }
                 Console.ReadLine();
             }));
         }
 
-        private static void AcceptSocket(IAsyncResult ar)
+        private void AcceptSocket(IAsyncResult ar)
         {
-            Socket socket = listener.EndAcceptSocket(ar);
+            Socket socket = this.listener.EndAcceptSocket(ar);
             NetworkStream ns = new NetworkStream(socket);
 
             BinaryReader reader = new BinaryReader(ns);
@@ -67,80 +73,95 @@ namespace qs
             (byte[] key, byte[] iv) aesParams = Encryption.GetDecryptedSymmetricKey(encrSymmetricKey, keypair.privateKey);
 
             // Receiving Files
-            ReceiveFiles(reader, aesParams);
+            this.ReceiveFiles(reader, aesParams);
 
             writer.Write(true);
 
             Environment.Exit(0);
         }
 
-        private static void ReceiveFiles(BinaryReader reader, (byte[] key, byte[] iv) aesParams)
+        private void ReceiveFiles(BinaryReader reader, (byte[] key, byte[] iv) aesParams)
         {
-
-            List<Task> fileWritingTasks = new List<Task>();
             while (reader.ReadBoolean())
             {
-                int fiLength = reader.ReadInt32();
-                byte[] encrFiArr = reader.ReadBytes(fiLength);
-                byte[] fileInfoArr = Encryption.Decrypt(encrFiArr, aesParams);
-                using MemoryStream msfi = new MemoryStream(fileInfoArr);
-                FileInformation fileInfo = new BinaryFormatter().Deserialize(msfi) as FileInformation;
+                this.ReceiveFile(reader, aesParams);
+            }
 
+            lock (this.writeLock)
+            {
+                Console.WriteLine("All Files Received.");
+            }
+        }
 
+        private void ReceiveFile(BinaryReader reader, (byte[] key, byte[] iv) aesParams)
+        {
+            int fiLength = reader.ReadInt32();
+            byte[] encrFiArr = reader.ReadBytes(fiLength);
+            byte[] fileInfoArr = Encryption.Decrypt(encrFiArr, aesParams);
+            using MemoryStream msfi = new MemoryStream(fileInfoArr);
+            FileInformation fileInfo = new BinaryFormatter().Deserialize(msfi) as FileInformation;
+            int left, top;
+
+            lock (this.writeLock)
+            {
                 Console.WriteLine("Receiving: " + fileInfo.FileName + " (" + fileInfo.Length + ")");
-                int left = Console.CursorLeft;
-                int top = Console.CursorTop;
 
-                void writePercentage(float progress, TimeSpan duration)
+                left = Console.CursorLeft;
+                top = Console.CursorTop;
+            }
+
+            void writePercentage(float progress, TimeSpan duration)
+            {
+                int totalWidth = Console.BufferWidth;
+                int barWidth = totalWidth - 2 /*Brackets*/ - 9 /*Progress*/ - 8 /*Duration*/;
+                int filledBarWidth = (int)Math.Floor(barWidth * progress);
+
+                lock (this.writeLock)
                 {
                     Console.SetCursorPosition(left, top);
-                    var totalWidth = Console.BufferWidth;
-                    var barWidth = totalWidth - 2 /*Brackets*/ - 9 /*Progress*/ - 8 /*Duration*/;
-                    var filledBarWidth = (int)Math.Floor(barWidth * progress);
-
                     Console.Write($"{duration:mm\\:ss\\.f} [{"".PadLeft(filledBarWidth, '▒')}{"".PadLeft(barWidth - filledBarWidth, ' ')}]{progress * 100,7:#.00}%");
                 }
+            }
 
+            int dataLength = reader.ReadInt32();
+            int bytesReceived = 0;
+            List<byte> bytes = new List<byte>();
+            DateTime start = DateTime.Now;
 
-                int dataLength = reader.ReadInt32();
-                int bytesReceived = 0;
-                List<byte> bytes = new List<byte>();
-                DateTime start = DateTime.Now;
+            int maxChunkSize = 16 * 1024;
 
-                var maxChunkSize = 16 * 1024;
+            do
+            {
+                byte[] part = reader.ReadBytes(Math.Min(maxChunkSize, dataLength - bytesReceived));
+                bytesReceived += part.Length;
 
-                do
+                bytes.AddRange(part);
+                writePercentage(bytesReceived / (float)dataLength, DateTime.Now - start);
+            } while (bytesReceived < dataLength);
+
+            lock (this.writeLock)
+            {
+                Console.WriteLine();
+            }
+
+            byte[] decryptedBytes = Encryption.Decrypt(bytes.ToArray(), aesParams);
+            byte[] hash = Encryption.GetHash(decryptedBytes);
+
+            lock (this.writeLock)
                 {
-                    var part = reader.ReadBytes(Math.Min(maxChunkSize, dataLength - bytesReceived));
-                    bytesReceived += part.Length;
-
-                    bytes.AddRange(part);
-                    writePercentage((float)bytesReceived / (float)dataLength, DateTime.Now - start);
-                } while (bytesReceived < dataLength);
-
-
-                fileWritingTasks.Add(Task.Run(() =>
-                {
-                    byte[] decryptedBytes = Encryption.Decrypt(bytes.ToArray(), aesParams);
-                    byte[] hash = Encryption.GetHash(decryptedBytes);
-                    
                     Console.SetCursorPosition(left + 10, top);
 
                     if (hash.SequenceEqual(fileInfo.FileHash))
                     {
-                            Console.Write(" Checksum OK ");
+                        Console.Write(" Checksum OK \n");
+
                         File.WriteAllBytes(fileInfo.FileName, decryptedBytes);
                     }
                     else
                     {
-                            Console.Write(" Checksum Failed ");
+                        Console.Write(" Checksum Failed \n");
                     }
-                }));
-                Console.WriteLine();
-            }
-
-            Task.WaitAll(fileWritingTasks.ToArray());
-            Console.WriteLine("All Files Received.");
+                }
         }
     }
 }
