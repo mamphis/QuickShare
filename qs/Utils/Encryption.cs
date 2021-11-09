@@ -57,6 +57,11 @@
             return AesCryptographyService.Decrypt(data, aesParams.key, aesParams.iv);
         }
 
+        internal static byte[] GetHash(byte[] data)
+        {
+            return SHA256.Create().ComputeHash(data);
+        }
+
         internal static class AesCryptographyService
         {
             internal static byte[] Encrypt(byte[] data, byte[] key, byte[] iv)
