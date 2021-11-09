@@ -79,9 +79,6 @@ namespace qs
                     Console.SetCursorPosition(origLeft, origTop);
                     Console.Write("Sending Files." + "".PadLeft(count++ % 4, '.') + "    ");
                 }
-
-                Console.WriteLine("\nDone sending files... Press Enter to exit.");
-                Console.ReadLine();
             }));
         }
 
@@ -141,12 +138,15 @@ namespace qs
             writer.Write(encrSymmetricKey.encrData);
 
             SendFiles(writer, files, (key: encrSymmetricKey.key, iv: encrSymmetricKey.iv));
+
+            reader.ReadBoolean();
+            currentState = TransferState.DoneSendingFiles;
         }
 
         private static void SendFiles(BinaryWriter writer, string[] files, (byte[] key, byte[] iv) aesParams)
         {
             BinaryFormatter formatter = new BinaryFormatter();
-            List<FileInformation> fileInfos = files.Select(f => new FileInformation() { FileName = f, Length = (int)new FileInfo(f).Length }).ToList();
+            List<FileInformation> fileInfos = files.Select(f => new FileInformation() { Path = f, FileName = new FileInfo(f).Name, Length = (int)new FileInfo(f).Length }).ToList();
             fileInfos.ForEach(fi =>
             {
                 writer.Write(true);
@@ -156,7 +156,7 @@ namespace qs
                 formatter.Serialize(ms, fi);
                 byte[] data = Encryption.Encrypt(ms.ToArray(), aesParams);
 
-                var bytes = File.ReadAllBytes(fi.FileName);
+                var bytes = File.ReadAllBytes(fi.Path);
                 var encrBytes = Encryption.Encrypt(bytes, aesParams);
 
                 // Send FI
@@ -169,9 +169,6 @@ namespace qs
             });
 
             writer.Write(false);
-            writer.Close();
-
-            currentState = TransferState.DoneSendingFiles;
         }
     }
 }

@@ -9,5 +9,8 @@
     {
         public int Length { get; set; }
         public string  FileName { get; set; }
+        
+        [NonSerialized]
+        public string Path;
     }
 }

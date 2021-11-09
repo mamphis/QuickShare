@@ -1,6 +1,7 @@
 ﻿using qs.Model;
 using qs.Utils;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -41,7 +42,8 @@ namespace qs
             listener.BeginAcceptSocket(AcceptSocket, null);
 
             udpClient.Send(data, data.Length, new IPEndPoint(IPAddress.Broadcast, Settings.BINDING_PORT));
-            Task.WaitAll(Task.Run(() => {
+            Task.WaitAll(Task.Run(() =>
+            {
                 Console.WriteLine("Press Enter to exit.");
                 Console.ReadLine();
             }));
@@ -66,32 +68,66 @@ namespace qs
 
             // Receiving Files
             ReceiveFiles(reader, aesParams);
+
+            writer.Write(true);
+
+            Environment.Exit(0);
         }
 
         private static void ReceiveFiles(BinaryReader reader, (byte[] key, byte[] iv) aesParams)
         {
-            while (true)
-            {
-                bool shouldReceiveFile = reader.ReadBoolean();
-                if (!shouldReceiveFile)
-                {
-                    break;
-                }
 
+            List<Task> fileWritingTasks = new List<Task>();
+            while (reader.ReadBoolean())
+            {
                 int fiLength = reader.ReadInt32();
                 byte[] encrFiArr = reader.ReadBytes(fiLength);
                 byte[] fileInfoArr = Encryption.Decrypt(encrFiArr, aesParams);
                 using MemoryStream msfi = new MemoryStream(fileInfoArr);
                 FileInformation fileInfo = new BinaryFormatter().Deserialize(msfi) as FileInformation;
 
+
                 Console.WriteLine("Receiving: " + fileInfo.FileName + " (" + fileInfo.Length + ")");
+                int left = Console.CursorLeft;
+                int top = Console.CursorTop;
+
+                void writePercentage(float progress, TimeSpan duration)
+                {
+                    Console.SetCursorPosition(left, top);
+                    var totalWidth = Console.BufferWidth;
+                    var barWidth = totalWidth - 2 /*Brackets*/ - 9 /*Progress*/ - 8 /*Duration*/;
+                    var filledBarWidth = (int)Math.Floor(barWidth * progress);
+
+                    Console.Write($"{duration:mm\\:ss\\.f} [{"".PadLeft(filledBarWidth, '▒')}{"".PadLeft(barWidth - filledBarWidth, ' ')}]{progress * 100,7:#.00}%");
+                }
+
+
                 int dataLength = reader.ReadInt32();
-                byte[] encrDataArr = reader.ReadBytes(dataLength);
-                File.WriteAllBytes(fileInfo.FileName, Encryption.Decrypt(encrDataArr, aesParams));
+                int bytesReceived = 0;
+                List<byte> bytes = new List<byte>();
+                DateTime start = DateTime.Now;
+
+                var maxChunkSize = 16 * 1024;
+
+                do
+                {
+                    var part = reader.ReadBytes(Math.Min(maxChunkSize, dataLength - bytesReceived));
+                    bytesReceived += part.Length;
+
+                    bytes.AddRange(part);
+                    writePercentage((float)bytesReceived / (float)dataLength, DateTime.Now - start);
+                } while (bytesReceived < dataLength);
+
+
+                fileWritingTasks.Add(Task.Run(() =>
+                {
+                    File.WriteAllBytes(fileInfo.FileName, Encryption.Decrypt(bytes.ToArray(), aesParams));
+                }));
+                Console.WriteLine();
             }
 
+            Task.WaitAll(fileWritingTasks.ToArray());
             Console.WriteLine("All Files Received.");
-            Environment.Exit(0);
         }
     }
 }
